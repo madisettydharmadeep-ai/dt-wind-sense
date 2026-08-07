@@ -1,0 +1,40 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.ipynb_checkpoints/
+venv/
+.venv/
+*.egg-info/
+
+# ── Data files ───────────────────────────────────────────────────────────────
+*.csv
+*.json.bz2
+*.json
+*.RData
+*.rds
+*.mat
+*.bz2
+*.gz
+*.zip
+
+# ── Pipeline outputs ──────────────────────────────────────────────────────────
+Step_1_outputs/
+Step_2_outputs/
+Step_3_outputs/
+step1_*.csv
+step2_*.csv
+step3_*.csv
+wt84_anomaly.png
+elm_result_wt84.png
+# *.png
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# ── Java (MATLAB commons-compress jar) ────────────────────────────────────────
+*.jar
