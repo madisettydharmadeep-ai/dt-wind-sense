@@ -24,18 +24,23 @@ Raw data: `.json.bz2` per turbine + `wind_plant_data.json` (alarm dictionary, 64
 ## What This Project Does
 
 ```
-Raw SCADA  →  Clean  →  Feature Selection  →  Pre-Causal Checks  →  Causal Discovery
-                                ↓
-                     ELM Anomaly Detection on WT84
+Raw SCADA
+  │  python_pipeline — feature finding (two-phase RF, no pre-filter) + cross-turbine ELM
+  ▼
+Selected features @ raw 5-min
+  │  00_data_checks       → clean + segmented (data gaps handled)
+  │  02_causal_prep       → glitch-clipped, detrended, standardised
+  │  03_window_bucketing  → overlapping time windows
+  ▼
+LiNGAM causal discovery            (+ ELM anomaly detection on WT84)
 ```
 
-1. **Data prep** — multi-format loader, imputation, IQR smoothing, drift removal, z-score normalisation
-2. **Feature selection** — variance filter → correlation drop → two-phase Random Forest
-   - Phase 1: RF(all sensors → fault alarm signal) → finds best target sensor (Y)
-   - Phase 2: RF(remaining sensors → Y) → finds top predictors (X)
-3. **Pre-causal checks** — stationarity (ADF), non-Gaussianity (kurtosis), ACF, time bucketing
-4. **Causal discovery** — LiNGAM on bucketed outputs
-5. **Anomaly detection** — ELM trained on healthy turbines (WT80–83), applied to full WT84 timeline
+1. **Feature finding** (`python_pipeline.ipynb`) — on **pure raw data**, no pre-filtering. Phase 1 RF (all sensors → fault alarm) picks the target sensor Y; Phase 2 RF (remaining → Y) picks the predictors X. A cross-turbine ELM (train WT80–83, test WT84) validates. Saves **only the selected columns at raw 5-min** resolution.
+2. **Data checks** (`00_data_checks.ipynb`) — detects the 233-day data gap + short blank runs; interpolates the short gaps and splits at the large gap into continuous **segments** (no fabricated data).
+3. **Causal prep** (`02_causal_prep.ipynb`) — per segment: robust **MAD glitch clipping** → drift removal → light winsorise → zero-mean / unit-variance standardisation.
+4. **Window bucketing** (`03_window_bucketing.ipynb`) — slices each segment into overlapping windows to track how the causal structure evolves over time.
+5. **Causal discovery** — LiNGAM on the windowed (or static weekly) outputs.
+6. **Anomaly detection** — the cross-turbine ELM flags WT84 ~5 months before the failure.
 
 ---
 
@@ -49,19 +54,23 @@ The ELM model — trained **only** on WT80–83 with no knowledge of WT84 — fl
 
 ```
 ├── causal-data-engine/
-│   ├── 01_data_prep.ipynb          # ingest, clean, standardise
-│   ├── 02_feature_selection.ipynb  # variance, correlation, two-phase RF
-│   ├── 03_pre_causal.ipynb         # stationarity, kurtosis, ACF, bucketing
+│   ├── pipeline/                     # ACTIVE pipeline
+│   │   ├── 00_data_checks.ipynb      # gap detection + segmentation
+│   │   ├── 02_causal_prep.ipynb      # MAD glitch clip, detrend, standardise
+│   │   └── 03_window_bucketing.ipynb # sliding windows for LiNGAM
+│   ├── 01_data_prep.ipynb            # legacy (retired)
+│   ├── 02_feature_selection.ipynb    # legacy (retired)
+│   ├── 03_pre_causal.ipynb           # legacy (retired)
 │   └── requirements.txt
 │
 ├── FUHRLANDER GITHUB REPO/
-│   ├── python_pipeline.ipynb       # full R+MATLAB rip-off in Python + WT84 anomaly detection
-│   ├── matlab/                     # original MATLAB feature selection + ELM
-│   ├── r/                          # original R data prep scripts
-│   └── dataset/                    # raw .json.bz2 files (git-ignored)
+│   ├── python_pipeline.ipynb         # feature finding on raw data + cross-turbine ELM + saves 5-min features
+│   ├── matlab/                       # original MATLAB feature selection + ELM
+│   ├── r/                            # original R data prep scripts
+│   └── dataset/                      # raw .json.bz2 files (git-ignored)
 │
-├── Fuhrlander_Research_Log.docx    # running research log
-└── explore.py                      # quick dataset exploration script
+├── Fuhrlander_Research_Log.docx      # running research log
+└── explore.py                        # quick dataset exploration script
 ```
 
 ---
@@ -75,16 +84,14 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Then run notebooks in order: `01` → `02` → `03`.
+**Run order:**
 
-For the standalone Python pipeline:
+1. `FUHRLANDER GITHUB REPO/python_pipeline.ipynb` — feature finding + ELM; saves the selected features at raw 5-min. Set `DATASET_PATH` in the config cell to the absolute path of the `dataset/` folder.
+2. `causal-data-engine/pipeline/00_data_checks.ipynb` — clean + segment.
+3. `causal-data-engine/pipeline/02_causal_prep.ipynb` — glitch-clip, detrend, standardise → causal-ready data.
+4. `causal-data-engine/pipeline/03_window_bucketing.ipynb` — slice into windows for LiNGAM.
 
-```bash
-cd "FUHRLANDER GITHUB REPO"
-jupyter notebook python_pipeline.ipynb
-```
-
-> Set `DATASET_PATH` in the config cell to the absolute path of the `dataset/` folder.
+> Set the `INPUT_DIR` / `OUTPUT_DIR` paths in each notebook's config cell so each stage reads the previous stage's output.
 
 ---
 
@@ -92,7 +99,8 @@ jupyter notebook python_pipeline.ipynb
 
 - Python, Jupyter, scikit-learn, NumPy, pandas, matplotlib
 - ELM (Extreme Learning Machine) — pseudoinverse solver
-- Random Forest (two-phase importance-based feature selection)
+- Random Forest (two-phase importance-based feature selection, on raw data)
+- Robust preprocessing — MAD glitch clipping, drift removal, z-score standardisation
 - LiNGAM (causal discovery)
 - Original reference implementation: R + MATLAB
 
