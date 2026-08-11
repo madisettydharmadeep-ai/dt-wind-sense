@@ -13,7 +13,7 @@ A Digital Twin research project under the **TwinARC** platform. Uses real-world 
 | | |
 |---|---|
 | Turbines | WT80 – WT84 |
-| Sensors | 312 analog signals × 4 stats (avg / max / min / sdv) = 1,248 signals |
+| Sensors | 78 sensors × 4 stats (avg / max / min / sdv) = 312 analog signals |
 | Resolution | 5-minute intervals, ~3 years |
 | Ground truth | WT84 experienced a real gearbox bearing failure in 2014 |
 
