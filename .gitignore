@@ -29,6 +29,10 @@ wt84_anomaly.png
 elm_result_wt84.png
 # *.png
 
+# ── Causal-engine outputs ────────────────────────────────────────────────────
+causal-data-engine/WT_80_Causal_Analysis_Results/
+causal-data-engine/logs/
+
 # ── OS / editor ───────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
