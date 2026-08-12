@@ -17,6 +17,7 @@ import warnings
 warnings.filterwarnings('ignore')
 import pickle
 import time
+import argparse
 
 # from HSIC.causality.utils.models import GAM
 # from HSIC.causality.utils.independence import HSIC, dHSIC
@@ -30,20 +31,33 @@ from tqdm import tqdm
 import seaborn as snspe
 from sklearn.covariance import GraphicalLasso
 
-
+# ── CLI overrides (set by causal_runner.py) ──
+_ap = argparse.ArgumentParser(add_help=False)
+_ap.add_argument('--file',        default=None)
+_ap.add_argument('--results-dir', default=None)
+_ap.add_argument('--lmin',        type=int,   default=None)
+_ap.add_argument('--lmax',        type=int,   default=None)
+_ap.add_argument('--linc',        type=int,   default=None)
+_ap.add_argument('--alpha',       type=float, default=None)
+_ap.add_argument('--ica-regu',    type=float, default=None)
+_cli, _ = _ap.parse_known_args()
 
 # df = pd.read_excel('exp_1_preprocessed_may_2.xlsx')
-filename = r'C:\Eminds pros\E-minds projects\fuhrlander\causal-data-engine\pipeline\windows\wt80_seg0_win001.csv'
+# filename = r'C:\Eminds pros\E-minds projects\fuhrlander\causal-data-engine\pipeline\windows\wt80_seg0_win000.csv'  # [RUNNER] overridden by --file
+filename = _cli.file or r'C:\Eminds pros\E-minds projects\fuhrlander\causal-data-engine\pipeline\windows\wt80_seg0_win000.csv'
 df = pd.read_csv(filename, index_col=0)
-filename_to_save = 'wt80_seg0_win00001'  #G2R16
+# filename_to_save = 'wt80_seg0_win000'  #G2R16  # [RUNNER] derived from filename
+filename_to_save = os.path.splitext(os.path.basename(filename))[0]
 # df = df.head(10000)
 print(df.columns)
 print(df.shape)
+# print('min timestamp: ', df['timestamp'].min())  # [RUNNER] timestamp is the index now
+# print('max timestamp: ', df['timestamp'].max())
 print('min timestamp: ', df.index.min())
 print('max timestamp: ', df.index.max())
 
 column_names_to_select = [
-    # 'timestamp',
+    # 'timestamp',  # [RUNNER] timestamp is now the index, not a data column
     'wrot_avg_A_ValBl1',
     'wrot_avg_A_ValBl2',
     'wrot_avg_V_ValBl1',
@@ -59,7 +73,8 @@ column_names_final = list(df.columns)
 print('column_names_final: ', column_names_final)
 
 # RESULTS_DIRECTORY = f'{filename_to_save}'+"_"+str(df.shape[1])
-RESULTS_DIRECTORY = f'{filename_to_save}'
+# RESULTS_DIRECTORY = "results"+"_"+str(df.shape[1])  # [RUNNER] derived from filename
+RESULTS_DIRECTORY = _cli.results_dir or f'{filename_to_save}'
 
 
 
@@ -72,9 +87,12 @@ print('samplesize: ',samplesize)
 Ni = 0
 Nt = df.shape[0] + Ni
 N = Nt - Ni
-Lmin =8  # CONFIG
-Lmax =15   # CONFIG
-Linc = 1
+# Lmin =6  # CONFIG        # [RUNNER] overridden by --lmin
+# Lmax =15   # CONFIG      # [RUNNER] overridden by --lmax
+# Linc = 1                 # [RUNNER] overridden by --linc
+Lmin = _cli.lmin if _cli.lmin is not None else 6
+Lmax = _cli.lmax if _cli.lmax is not None else 15
+Linc = _cli.linc if _cli.linc is not None else 1
 kurt = np.zeros((num_nodes, 1))
 hsim = 0
 Bstore = np.zeros((num_nodes, 1))
@@ -86,13 +104,16 @@ hsic_overall_results = {}
 ITER=5
 bootstrap_exp=False
 
- 
+# [RUNNER] Per-L cache: only the best L is written to disk after the loop
+_cache = {}   # {L: {'B': (N,N), 'scale': (N,N), 'fog': (N,N)|None, 'yy': (N,T)}}
 
 
 
-SET_LAMBDA = 0.1
+# SET_LAMBDA = 0.1     # [RUNNER] overridden by --alpha
+# ICA_regu = 0.05      # [RUNNER] overridden by --ica-regu
+SET_LAMBDA = _cli.alpha    if _cli.alpha    is not None else 0.1
 ICA_lambda = np.log(samplesize) * SET_LAMBDA  # usually lamda is set to a constant times log(T), where T is sample size.
-ICA_regu = 0.05
+ICA_regu   = _cli.ica_regu if _cli.ica_regu is not None else 0.05
 stablize_tol = 0.02
 stablize_sparsify = True
 
@@ -1201,12 +1222,29 @@ def plot_pairplot(df, path, L):
 
 def plot_ecg_graph(filename):
     import matplotlib.dates as mdates
-    df = pd.read_csv(filename, parse_dates=['timestamp'])
-    df = df.sort_values('timestamp').reset_index(drop=True)
-    df.set_index('timestamp', inplace=True)
-    
-    
-    columns_to_plot = column_names_to_select
+    # [RUNNER] window CSVs store timestamp as the index (first unnamed column), not a column
+    df = pd.read_csv(filename, index_col=0)
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+
+    column_names_to_select = [
+    "Gearbox Temperature",
+    "Gearbox Oil Temperature",
+    "Gearbox Bearing 151 Temperature",
+    "Gearbox Bearing 152 Temperature",
+    "Gearbox Bearing 450 Temperature",
+    "Gearbox Bearing 452 Temperature",
+    "Gearbox Oil Pressure",
+    "Bearing Oil Pressure",
+    "Bearing Inlet Oil Pressure",
+    "Gearbox Cooling Water Forward Temperature",
+    "Gearbox Cooling Water Backward Temperature",
+    ]
+
+    # [RUNNER] use only the columns that exist in this file; fall back to the analysis columns if none of the gearbox names match
+    columns_to_plot = [c for c in column_names_to_select if c in df.columns]
+    if not columns_to_plot:
+        columns_to_plot = [c for c in column_names_final if c in df.columns]
 
     fig, axs = plt.subplots(len(columns_to_plot), 1, figsize=(14, 3 * len(columns_to_plot)), sharex=True)
     if len(columns_to_plot) == 1:
@@ -1391,7 +1429,7 @@ for L in range(Lmin, Lmax + 1, Linc):
     scatter_plot_nd_array = X.T
 
 
-    save_Hn_matrix_to_excel(Hn,iteration_folder_path, L)
+    # save_Hn_matrix_to_excel(Hn,iteration_folder_path, L)  # [RUNNER] per-L save skipped
 
     agg_df = pd.DataFrame(scatter_plot_nd_array, columns=column_names_to_select)
 
@@ -1399,13 +1437,14 @@ for L in range(Lmin, Lmax + 1, Linc):
     # print('stage: generate_index_colored_pairplot')
     # generate_index_colored_pairplot(agg_df, iteration_folder_path, L)
 
-    try:
-        plot_pairplot(agg_df, iteration_folder_path, L)
-        generate_index_colored_pairplot(agg_df, iteration_folder_path, L)
-    except:
-        pass
-        
-    save_csv(agg_df, iteration_folder_path, L)
+    # [RUNNER] pairplots and CSV skipped per-iteration
+    # try:
+    #     plot_pairplot(agg_df, iteration_folder_path, L)
+    #     generate_index_colored_pairplot(agg_df, iteration_folder_path, L)
+    # except:
+    #     pass
+
+    # save_csv(agg_df, iteration_folder_path, L)  # [RUNNER] per-L save skipped
 
 
     print("stage: two_step_CD")
@@ -1429,7 +1468,7 @@ for L in range(Lmin, Lmax + 1, Linc):
 
 
         iteration_folder_path = os.path.join(RESULTS_DIRECTORY, str(L))
-        plot_mean_std_for_non_zero_entries(b_matrices_list, num_nodes, iteration_folder_path)
+        # plot_mean_std_for_non_zero_entries(b_matrices_list, num_nodes, iteration_folder_path)  # [RUNNER] per-L skipped
         b_matrix_with_mean_std = calcuearly_mean_std_for_non_zero_entry(b_matrices_list, num_nodes)
         b_matrix_std_mean_dict = store_mean_std_dict_for_non_zero_entries(b_matrices_list, num_nodes)
         figure_of_merit_b_matrix = calcuearly_figure_of_merit(b_matrix_with_mean_std, num_nodes)
@@ -1440,32 +1479,32 @@ for L in range(Lmin, Lmax + 1, Linc):
         # print(figure_of_merit_b_matrix)
 
         iteration_folder_path = os.path.join(RESULTS_DIRECTORY, str(L))
-        save_b_matrix_to_excel(figure_of_merit_b_matrix, iteration_folder_path, L, fog=True)
+        # save_b_matrix_to_excel(figure_of_merit_b_matrix, iteration_folder_path, L, fog=True)  # [RUNNER] saved for best L only
 
 
     iteration_folder_path = os.path.join(RESULTS_DIRECTORY, str(L))
 
     # print('B_adjacency_matrix')
     # print(B_adjacency_matrix)
-    save_b_matrix_to_excel(B_adjacency_matrix, iteration_folder_path, L, fog=False, scale=False)
-    transpose_values_keep_headers(B_adjacency_matrix, iteration_folder_path, L)
+    # save_b_matrix_to_excel(B_adjacency_matrix, iteration_folder_path, L, fog=False, scale=False)  # [RUNNER] saved for best L only
+    # transpose_values_keep_headers(B_adjacency_matrix, iteration_folder_path, L)                  # [RUNNER] saved for best L only
     scale_b_matrix = scale_b_matrix_func(B_adjacency_matrix)
     # print('scale_b_matrix')
     # print(scale_b_matrix)
-    save_b_matrix_to_excel(scale_b_matrix, iteration_folder_path, L, fog=False, scale=True)
+    # save_b_matrix_to_excel(scale_b_matrix, iteration_folder_path, L, fog=False, scale=True)     # [RUNNER] saved for best L only
 
 
 
     Bstore = np.hstack([Bstore, B_adjacency_matrix])
 
-    
+
     yy = np.dot(W_m, X)
-    iteration_folder_path_b_matrix = os.path.join(RESULTS_DIRECTORY, str(L))
-    file_name_yy_matrix = os.path.join(iteration_folder_path, f'yy_Matrix_{L}.pkl')
-    save_yy_matrix_to_excel(yy.T, iteration_folder_path, L) 
-    import torch
-    torch.save(yy, file_name_yy_matrix)  # Uses PyTorch's serialization
-   
+    # iteration_folder_path_b_matrix = os.path.join(RESULTS_DIRECTORY, str(L))
+    # file_name_yy_matrix = os.path.join(iteration_folder_path, f'yy_Matrix_{L}.pkl')
+    # save_yy_matrix_to_excel(yy.T, iteration_folder_path, L)   # [RUNNER] saved for best L only
+    # import torch
+    # torch.save(yy, file_name_yy_matrix)  # [RUNNER] pickle skipped
+
     # print(yy)
     # print(yy.shape)
 
@@ -1473,18 +1512,17 @@ for L in range(Lmin, Lmax + 1, Linc):
     # print('yy here')
     kt = scipy.stats.kurtosis(yy, axis=1, fisher=True)  # changed here yy to Hn-X
 
-    
+
     kurt = np.column_stack((kurt, kt))
 
     Lp.append(L)
     Bopt = B_adjacency_matrix
     # print("bopt",Bopt)
     # print("b",B_adjacency_matrix)
-    print("stage: dg_plot")
-
-    dg_plot(Bopt,L, num_nodes, column_names_final)
-    print('scaling')
-    dg_plot(scale_b_matrix,L, num_nodes, column_names_final)
+    # print("stage: dg_plot")  # [RUNNER] dg_plot images skipped per-iteration
+    # dg_plot(Bopt,L, num_nodes, column_names_final)
+    # print('scaling')
+    # dg_plot(scale_b_matrix,L, num_nodes, column_names_final)
 
 
 
@@ -1494,9 +1532,17 @@ for L in range(Lmin, Lmax + 1, Linc):
     # print('hsic_results')
     # print(type(hsic_results))
     # print(hsic_results)
-    visualize_hsic_results(hsic_results, yy.shape[0], L)
+    # visualize_hsic_results(hsic_results, yy.shape[0], L)  # [RUNNER] per-L HSIC image skipped
     hsic_overall_results[L] = hsic_results
     # plot_green_blocks_over_iterations(iteration_results_example, yy.shape[0])
+
+    # [RUNNER] Cache while yy is still (num_nodes, T) — matches original ordering
+    _cache[L] = {
+        'B':     B_adjacency_matrix,
+        'scale': scale_b_matrix,
+        'fog':   figure_of_merit_b_matrix if bootstrap_exp else None,
+        'yy':    yy.copy(),
+    }
 
 
     #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%---NEW HSIC CODE----%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
@@ -1504,7 +1550,7 @@ for L in range(Lmin, Lmax + 1, Linc):
     # Cross AND Auto-correlation functions of SEM noise, yy
     # numpy.correlate is used as the equivalent of MATLAB's xcorr with 'full' mode
 
-    print("stage: Autocorrelation with yy")
+    # print("stage: Autocorrelation with yy")  # [RUNNER] autocorrelation plots skipped per-iteration
 
 
     yy = yy.T
@@ -1514,123 +1560,89 @@ for L in range(Lmin, Lmax + 1, Linc):
     # Assuming `yy` is a NumPy array with shape (2000, 4)
     Nw = yy.shape[0]  # or any other appropriate value for Nw
 
-    # Calcuearly cross and auto-correlation functions
-    xrf_list = []
-    for i in range(yy.shape[1]):
-        for j in range(yy.shape[1]):
-            corr = correlate(yy[:, i], yy[:, i], mode='full')
-            center = len(corr) // 2
-            xrf_list.append(corr[center - 31:center + 32])  # Extract 63 values centered at zero lag
+    # [RUNNER] autocorrelation-plot block skipped per-iteration
+    # xrf_list = []
+    # for i in range(yy.shape[1]):
+    #     for j in range(yy.shape[1]):
+    #         corr = correlate(yy[:, i], yy[:, i], mode='full')
+    #         center = len(corr) // 2
+    #         xrf_list.append(corr[center - 31:center + 32])
+    # xrf = np.array(xrf_list).T
+    # xrf = xrf / Nw
+    # plt.figure()
+    # plt.plot(xrf)
+    # iteration_folder_path = os.path.join(RESULTS_DIRECTORY, str(L))
+    # plot_filename_corr = os.path.join(iteration_folder_path, f'yy_plot_iteration_autoCorr_{L}.png')
+    # plt.savefig(plot_filename_corr)
+    # mean_curve = np.mean(xrf, axis=1)
+    # plt.figure(figsize=(10, 6))
+    # plt.stem(mean_curve, linefmt='b-', markerfmt='bo', basefmt='r-', label='ACF')
+    # confidence_bound = 0.2
+    # plt.axhline(y=confidence_bound, color='orange', linestyle='--', label='Confidence Bound')
+    # plt.axhline(y=-confidence_bound, color='orange', linestyle='--')
+    # plt.xlabel('Lag')
+    # plt.ylabel('Autocorrelation')
+    # plt.title(' Autocorrelation Function with yy')
+    # plt.legend()
+    # plt.grid(True)
+    # plot_filename_corr_stem = os.path.join(iteration_folder_path, f'yy_stem_autoCorr_{L}.png')
+    # plt.savefig(plot_filename_corr_stem)
 
-    # Convert list to NumPy array
-    xrf = np.array(xrf_list).T
-
-    # Normalize by Nw
-    xrf = xrf / Nw
-
-
-
-    # Plotting xrf
-    plt.figure()
-    plt.plot(xrf)
-    # plt.show()
-    iteration_folder_path = os.path.join(RESULTS_DIRECTORY, str(L))
-    plot_filename_corr = os.path.join(iteration_folder_path, f'yy_plot_iteration_autoCorr_{L}.png')
-    plt.savefig(plot_filename_corr)
-    # print("*"*100)
-
-    mean_curve = np.mean(xrf, axis=1)
-
-    # Create the stem plot
-    plt.figure(figsize=(10, 6))
-    plt.stem(mean_curve, linefmt='b-', markerfmt='bo', basefmt='r-', label='ACF')
-
-    # Add confidence bounds (example: ±0.2 for illustration)
-    confidence_bound = 0.2
-    plt.axhline(y=confidence_bound, color='orange', linestyle='--', label='Confidence Bound')
-    plt.axhline(y=-confidence_bound, color='orange', linestyle='--')
-    # Add labels and title
-    plt.xlabel('Lag')
-    plt.ylabel('Autocorrelation')
-    plt.title(' Autocorrelation Function with yy')
-    plt.legend()
-    plt.grid(True)
-    plot_filename_corr_stem = os.path.join(iteration_folder_path, f'yy_stem_autoCorr_{L}.png')
-    plt.savefig(plot_filename_corr_stem)
-
-    print("stage: Autocorrelation with X")
-
-
-    auto_x = X.T
-
-
-    # Assuming `yy` is a NumPy array with shape (2000, 4)
-    Nw = auto_x.shape[0]  # or any other appropriate value for Nw
-
-    # Calcuearly cross and auto-correlation functions
-    xrf_list_x = []
-    for i in range(auto_x.shape[1]):
-        for j in range(auto_x.shape[1]):
-            corr = correlate(auto_x[:, i], auto_x[:, i], mode='full')
-            center = len(corr) // 2
-            xrf_list_x.append(corr[center - 31:center + 32])  # Extract 63 values centered at zero lag
-
-    # Convert list to NumPy array
-    xrf_x = np.array(xrf_list_x).T
-
-    # Normalize by Nw
-    xrf_x = xrf_x / Nw
-
-
-    # Plotting xrf
-    plt.figure()
-    plt.plot(xrf_x)
-    # plt.show()
-    iteration_folder_path = os.path.join(RESULTS_DIRECTORY, str(L))
-    plot_filename_corr = os.path.join(iteration_folder_path, f'X_plot_iteration_autoCorr_{L}.png')
-    plt.savefig(plot_filename_corr)
-    # print("*"*100)
-
-    mean_curve = np.mean(xrf_x, axis=1)
-
-    # Create the stem plot
-    plt.figure(figsize=(10, 6))
-    plt.stem(mean_curve, linefmt='b-', markerfmt='bo', basefmt='r-', label='ACF')
-
-    # Add confidence bounds (example: ±0.2 for illustration)
-    confidence_bound = 0.2
-    plt.axhline(y=confidence_bound, color='orange', linestyle='--', label='Confidence Bound')
-    plt.axhline(y=-confidence_bound, color='orange', linestyle='--')
-    # Add labels and title
-    plt.xlabel('Lag')
-    plt.ylabel('Autocorrelation')
-    plt.title('Autocorrelation Function with X')
-    plt.legend()
-    plt.grid(True)
-    plot_filename_corr_stem_x = os.path.join(iteration_folder_path, f'x_stem_autoCorr_{L}.png')
-    plt.savefig(plot_filename_corr_stem_x)
+    # print("stage: Autocorrelation with X")
+    # auto_x = X.T
+    # Nw = auto_x.shape[0]
+    # xrf_list_x = []
+    # for i in range(auto_x.shape[1]):
+    #     for j in range(auto_x.shape[1]):
+    #         corr = correlate(auto_x[:, i], auto_x[:, i], mode='full')
+    #         center = len(corr) // 2
+    #         xrf_list_x.append(corr[center - 31:center + 32])
+    # xrf_x = np.array(xrf_list_x).T
+    # xrf_x = xrf_x / Nw
+    # plt.figure()
+    # plt.plot(xrf_x)
+    # iteration_folder_path = os.path.join(RESULTS_DIRECTORY, str(L))
+    # plot_filename_corr = os.path.join(iteration_folder_path, f'X_plot_iteration_autoCorr_{L}.png')
+    # plt.savefig(plot_filename_corr)
+    # mean_curve = np.mean(xrf_x, axis=1)
+    # plt.figure(figsize=(10, 6))
+    # plt.stem(mean_curve, linefmt='b-', markerfmt='bo', basefmt='r-', label='ACF')
+    # confidence_bound = 0.2
+    # plt.axhline(y=confidence_bound, color='orange', linestyle='--', label='Confidence Bound')
+    # plt.axhline(y=-confidence_bound, color='orange', linestyle='--')
+    # plt.xlabel('Lag')
+    # plt.ylabel('Autocorrelation')
+    # plt.title('Autocorrelation Function with X')
+    # plt.legend()
+    # plt.grid(True)
+    # plot_filename_corr_stem_x = os.path.join(iteration_folder_path, f'x_stem_autoCorr_{L}.png')
+    # plt.savefig(plot_filename_corr_stem_x)
 
 
     end_time = time.perf_counter()
     loop_time = end_time - start_time
     print(f"Loop {L} took {loop_time:.4f} seconds")
 
-    import pickle
-    iteration_folder_path_b_matrix = os.path.join(RESULTS_DIRECTORY, str(L))
-    file_name_b_matrix = os.path.join(iteration_folder_path, f'B_Matrix_{L}.pkl')
-    
-    with open(file_name_b_matrix, 'wb') as f:
-        pickle.dump(B_adjacency_matrix, f)
+    # [RUNNER] per-L pickle skipped
+    # import pickle
+    # iteration_folder_path_b_matrix = os.path.join(RESULTS_DIRECTORY, str(L))
+    # file_name_b_matrix = os.path.join(iteration_folder_path, f'B_Matrix_{L}.pkl')
+    # with open(file_name_b_matrix, 'wb') as f:
+    #     pickle.dump(B_adjacency_matrix, f)
 
     print('*'*100)
 
 
 print('Stage: HSIC Normalized StemPlot')
 
-highest_agg_factor = plot_green_blocks_stem(hsic_overall_results, yy.shape[0])
+os.makedirs(RESULTS_DIRECTORY, exist_ok=True)  # [RUNNER] ensure folder exists for post-loop saves
+highest_agg_factor = plot_green_blocks_stem(hsic_overall_results, num_nodes)  # [RUNNER] use num_nodes (semantically correct, same result — count_green_blocks sums all)
 print("highest_agg_factor: ", highest_agg_factor)
 print('Stage: Bucket ECG Plot')
-plot_ecg_graph(filename)
+try:
+    plot_ecg_graph(filename)
+except Exception as _ecg_err:
+    print(f"[WARN] plot_ecg_graph failed: {_ecg_err}")
 
 
 
@@ -1677,10 +1689,21 @@ plt.title('Sum of Magnitude of top 3 Kurtosis')
 # plt.show()
 
 plt.savefig(RESULTS_DIRECTORY+"/Kurtosis.png")
+plt.close('all')  # [RUNNER] release figure memory
 # Aggregate data cross-correlation matrix
 xrm = np.dot(Hn.T, Hn) / Nw
 
-
+# [RUNNER] Save Excel files for the best L only (matches original save calls exactly)
+print(f'Stage: Saving Excel results for best L={highest_agg_factor}')
+_best = _cache[highest_agg_factor]
+_best_folder = os.path.join(RESULTS_DIRECTORY, str(highest_agg_factor))
+os.makedirs(_best_folder, exist_ok=True)
+save_b_matrix_to_excel(_best['B'],     _best_folder, highest_agg_factor, fog=False, scale=False)
+transpose_values_keep_headers(_best['B'], _best_folder, highest_agg_factor)
+save_b_matrix_to_excel(_best['scale'], _best_folder, highest_agg_factor, fog=False, scale=True)
+if _best['fog'] is not None:
+    save_b_matrix_to_excel(_best['fog'], _best_folder, highest_agg_factor, fog=True)
+save_yy_matrix_to_excel(_best['yy'].T, _best_folder, highest_agg_factor)   # yy cached as (nodes, T); .T -> (T, nodes), same as original call
 
 
 # Create a folder called "run1" and move the "Graphs" folder into it
