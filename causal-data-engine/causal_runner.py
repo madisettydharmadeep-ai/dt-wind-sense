@@ -57,7 +57,7 @@ def write_log():
         f.write("\n".join(_log_lines) + "\n")
     print(f"\nLog saved to: {log_path}")
 
-# ── header ────────────────────────────────────────────────────────────────────
+# ── headerr ────────────────────────────────────────────────────────────────────
 
 log(f"\n{'='*65}")
 log(f"  causal_runner.py")
