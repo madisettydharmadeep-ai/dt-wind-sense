@@ -22,8 +22,8 @@ WINDOWS_DIR = r'C:\Eminds pros\E-minds projects\fuhrlander\causal-data-engine\pi
 PATTERN = 'wt80_seg0_win'
 
 # Window range (inclusive on both ends)
-WIN_FROM = 0
-WIN_TO   = 10
+WIN_FROM = 11
+WIN_TO   = 27
 
 LMIN  = 3      # minimum aggregation factor
 LMAX  = 15     # maximum aggregation factor
