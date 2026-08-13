@@ -1,5 +1,5 @@
 """
-causal_runner.py  --  configure and batch-launch causal_29_12.py
+causal_runner.py  --  configure and batch-launch causal_29_12_runner.py
 
 Edit the CONFIG section below, then run:
     python causal_runner.py
